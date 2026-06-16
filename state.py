@@ -25,7 +25,7 @@ class Article(TypedDict, total=False):
     source_domain: str  # Domain extracted from URL (e.g., "anthropic.com")
     published_date: datetime  # When the article was published
     summary: str  # Raw text summary from source (RSS, web scrape, or abstract)
-    fetch_source: str  # Which subagent fetched: "rss", "tavily_search", "hacker_news", "arxiv"
+    fetch_source: str  # Which subagent fetched: "rss", "hacker_news", "arxiv"
 
     # Validation phase (set by validator)
     validation_status: str  # "valid", "removed", or "pending"

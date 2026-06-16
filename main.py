@@ -10,11 +10,14 @@ Uses SqliteSaver for persistent state checkpointing across the human review paus
 Streams execution with rich terminal output and progress reporting.
 """
 
+import json
 import logging
-import uuid
+import os
 import subprocess
-import time
 import sys
+import time
+import uuid
+import webbrowser
 from datetime import datetime
 from typing import Any
 
@@ -23,9 +26,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from rich.console import Console
 from rich.logging import RichHandler
 
-from state import ARIAState
-from memory.db import init_db
 from config import INTEREST_PROFILE
+from memory.db import init_db
+from state import ARIAState
 
 # Import all nodes
 from agents.supervisor import supervisor_node
@@ -57,30 +60,24 @@ def launch_streamlit_review(run_id: str, console: Console) -> subprocess.Popen:
     """
     console.print("[bold cyan]🌐 Launching Streamlit review interface...[/bold cyan]\n")
 
-    # Set up environment to skip Streamlit's onboarding prompt
-    import os as os_module
-    env = os_module.environ.copy()
+    env = os.environ.copy()
     env["STREAMLIT_SERVER_HEADLESS"] = "true"
     env["STREAMLIT_SERVER_PORT"] = "8501"
     env["STREAMLIT_LOGGER_LEVEL"] = "error"
 
-    # Launch streamlit in background (capture errors for debugging)
     process = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", "ui/review_app.py",
          "--logger.level=error", "--client.showErrorDetails=true"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        stdin=subprocess.DEVNULL,  # Disable stdin to prevent onboarding prompt
+        stdin=subprocess.DEVNULL,
         text=True,
         env=env,
-        preexec_fn=None  # For macOS/Linux
     )
 
-    # Wait for Streamlit to start and check if it's running
     time.sleep(4)
 
     if process.poll() is not None:
-        # Process already exited - capture error
         stdout, stderr = process.communicate()
         console.print("[red]✗ Streamlit failed to start[/red]")
         console.print("[red]Error output:[/red]")
@@ -93,9 +90,7 @@ def launch_streamlit_review(run_id: str, console: Console) -> subprocess.Popen:
     console.print("[green]✓ Streamlit started at http://localhost:8501[/green]\n")
     console.print("[cyan]Opening in your browser...[/cyan]\n")
 
-    # Try to open browser (optional, may fail on headless systems)
     try:
-        import webbrowser
         webbrowser.open("http://localhost:8501")
     except Exception:
         pass
@@ -174,9 +169,6 @@ def resume_from_checkpoint(graph, config: dict, decision_state: dict, console: C
     except Exception as e:
         logger.debug(f"Could not get current state: {e}, using decision state")
         merged_state = decision_state
-
-    # Manually route based on decision and call appropriate nodes
-    from tools.human_review import human_review_node
 
     try:
         # First, run human_review to process decision
@@ -321,18 +313,7 @@ def main():
             "run_id": run_id,
             "run_timestamp": start_time,
             "user_id": "aria_user",
-            "interest_profile": {
-                "Large Language Models": 0.95,
-                "Multimodal AI": 0.85,
-                "Agents & Autonomous Systems": 0.80,
-                "AI Safety & Alignment": 0.75,
-                "Computer Vision": 0.70,
-                "Reinforcement Learning": 0.60,
-                "AI Infrastructure": 0.65,
-                "AI Policy & Ethics": 0.50,
-                "Robotics": 0.40,
-                "Quantum Computing": 0.20,
-            },
+            "interest_profile": INTEREST_PROFILE,
             "interest_profile_edits": None,
             "articles": [],
             "fetch_errors": [],
@@ -429,12 +410,9 @@ def main():
                 console.print("[yellow]" + "━" * 70 + "[/yellow]\n")
 
                 # Save state to JSON file for Streamlit to read
-                import json
-                from datetime import datetime as dt
-
                 def json_serializer(obj):
-                    """Custom JSON serializer for objects not serializable by default json code."""
-                    if isinstance(obj, (dt, datetime)):
+                    """Custom JSON serializer for non-serializable objects."""
+                    if isinstance(obj, datetime):
                         return obj.isoformat()
                     return str(obj)
 

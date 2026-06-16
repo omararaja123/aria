@@ -8,8 +8,6 @@ Consolidated node that coordinates 3 parallel data sources:
 
 Internal parallelization via asyncio; each fetcher runs concurrently.
 Results aggregated via Annotated[list, operator.add] for thread-safe appends.
-
-Note: Tavily web search disabled - results lacked reliable date extraction.
 """
 
 import asyncio
@@ -49,17 +47,10 @@ except ImportError:
     HAS_ARXIV = False
     logger.warning("arxiv not installed; ArXiv fetching will be skipped")
 
-try:
-    from tavily import TavilyClient
-    HAS_TAVILY = True
-except ImportError:
-    HAS_TAVILY = False
-    logger.warning("tavily not installed; Tavily search will be skipped")
-
 
 def subagent_dispatcher_node(state: ARIAState) -> ARIAState:
     """
-    Coordinator for all 4 subagents (RSS, Tavily, HN, ArXiv).
+    Coordinator for 3 parallel subagents (RSS, HN, ArXiv).
 
     Error handling: Each fetcher runs in isolation; failure of one doesn't block others.
     """
@@ -134,11 +125,6 @@ async def _run_all_fetchers(
     if HAS_FEEDPARSER and subagent_instructions.get("rss", {}).get("enabled", True):
         max_articles = subagent_instructions.get("rss", {}).get("max_articles", 15)
         tasks.append(("rss", _fetch_rss(max_articles)))
-
-    # Tavily fetcher - DISABLED (results lacked reliable date extraction)
-    # if HAS_TAVILY and subagent_instructions.get("tavily", {}).get("enabled", True):
-    #     max_articles = subagent_instructions.get("tavily", {}).get("max_articles", 10)
-    #     tasks.append(("tavily", _fetch_tavily(priority_topics, max_articles)))
 
     # Hacker News fetcher
     if subagent_instructions.get("hacker_news", {}).get("enabled", True):
@@ -228,94 +214,6 @@ async def _fetch_rss(max_articles: int = 15) -> tuple[List[Article], List[Dict]]
                 "error_msg": str(e),
                 "timestamp": datetime.now().isoformat(),
             })
-
-    return articles[:max_articles], errors
-
-
-async def _fetch_tavily(
-    priority_topics: List[str],
-    max_articles: int = 10,
-) -> tuple[List[Article], List[Dict]]:
-    """Fetch from Tavily web search API. Tavily results are typically fresh (< 7 days)."""
-    articles = []
-    errors = []
-
-    if not HAS_TAVILY:
-        logger.warning("Tavily not installed; skipping Tavily search")
-        return articles, errors
-
-    max_age_days = RUNAWAY_GUARDS.get("max_article_age_days", 7)
-
-    try:
-        tavily = TavilyClient()
-
-        # Search for each priority topic
-        for topic in priority_topics[:3]:  # Limit to top 3 topics to avoid API abuse
-            try:
-                logger.info(f"Searching Tavily for: {topic}")
-                response = await asyncio.to_thread(
-                    tavily.search,
-                    f"{topic} AI research news",
-                    max_results=max_articles // 3,  # Divide budget across topics
-                )
-
-                for result in response.get("results", []):
-                    article_url = result.get("url", "")
-                    article_domain = _extract_domain(article_url)
-
-                    # Skip blacklisted domains (aggregators, user-generated content)
-                    if any(blacklist in article_domain for blacklist in DOMAIN_BLACKLIST):
-                        logger.debug(f"Tavily: skipping blacklisted domain {article_domain}")
-                        continue
-
-                    # Try to extract actual publish date from URL/HTML
-                    # Be strict: if date extraction fails, skip the article
-                    try:
-                        published_date = await extract_article_date(article_url, timeout=3)
-                        if not published_date:
-                            # Could not extract date - skip to avoid old content
-                            logger.debug(f"Tavily: skipping article with no extractable date: {result.get('title', 'Unknown')[:60]}")
-                            continue
-                        logger.debug(f"Tavily: extracted date {published_date.date()} from {article_url}")
-                    except Exception as e:
-                        logger.debug(f"Tavily: date extraction failed for {article_url}: {e}, skipping")
-                        continue
-
-                    # Skip if article is too old (use extracted date)
-                    if _is_article_too_old(published_date, max_age_days):
-                        logger.debug(f"Tavily: skipping old article from {published_date.date()}: {result.get('title', 'Unknown')[:60]}")
-                        continue
-
-                    article = {
-                        "id": str(uuid.uuid4()),
-                        "url": article_url,
-                        "title": result.get("title", ""),
-                        "summary": result.get("content", ""),
-                        "published_date": published_date,
-                        "source_domain": _extract_domain(article_url),
-                        "fetch_source": "tavily_search",
-                        "tavily_score": result.get("score", 0.0),
-                    }
-                    if article["url"]:
-                        articles.append(article)
-
-                logger.info(f"Tavily {topic}: fetched {len(response.get('results', []))} articles")
-
-            except Exception as e:
-                logger.error(f"Tavily search for '{topic}' failed: {e}")
-                errors.append({
-                    "source": f"tavily:{topic}",
-                    "error_msg": str(e),
-                    "timestamp": datetime.now().isoformat(),
-                })
-
-    except Exception as e:
-        logger.error(f"Tavily initialization failed: {e}")
-        errors.append({
-            "source": "tavily",
-            "error_msg": str(e),
-            "timestamp": datetime.now().isoformat(),
-        })
 
     return articles[:max_articles], errors
 

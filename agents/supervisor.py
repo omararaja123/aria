@@ -109,7 +109,7 @@ def _call_supervisor_strategy_llm(
     """
     Call Claude Sonnet 4.6 to reason about:
     1. Which topics to prioritize this week (based on interest profile and recent coverage)
-    2. Which subagents to enable (RSS always, Tavily/HN/ArXiv conditional)
+    2. Which subagents to enable (RSS always, HN/ArXiv conditional)
     3. Dynamic fetch budgets per subagent
 
     Returns:
@@ -133,12 +133,11 @@ def _call_supervisor_strategy_llm(
     system_prompt = """You are the strategic orchestrator for an AI research newsletter.
 Your job is to reason about:
 1. Which topics should be emphasized this week based on the user's interests and recent coverage
-2. Which sources/subagents to activate (RSS, Tavily web search, Hacker News, ArXiv)
+2. Which sources/subagents to activate (RSS, Hacker News, ArXiv)
 3. Dynamic fetch budgets per subagent
 
 Guidelines:
 - RSS fetcher: Always enabled (low cost, reliable)
-- Tavily search: Enable if budget permits and trending topics are underrepresented
 - Hacker News: Enable for developer sentiment and hot takes (if budget permits)
 - ArXiv: Enable if the interest profile emphasizes research topics (LLMs, Vision, RL, Safety)
 - Vary fetch budgets based on cost constraints:
@@ -169,7 +168,6 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   "priority_topics": ["Topic 1", "Topic 2", ...],
   "subagents": {{
     "rss": {{"enabled": true, "max_articles": N}},
-    "tavily": {{"enabled": true/false, "max_articles": N}},
     "hacker_news": {{"enabled": true/false, "max_articles": N}},
     "arxiv": {{"enabled": true/false, "max_articles": N}}
   }}
@@ -197,10 +195,6 @@ Respond with ONLY a JSON object (no markdown, no explanation):
                 "enabled": subagent_config.get("rss", {}).get("enabled", True),
                 "max_articles": subagent_config.get("rss", {}).get("max_articles", 15),
             },
-            "tavily": {
-                "enabled": subagent_config.get("tavily", {}).get("enabled", True),
-                "max_articles": subagent_config.get("tavily", {}).get("max_articles", 10),
-            },
             "hacker_news": {
                 "enabled": subagent_config.get("hacker_news", {}).get("enabled", True),
                 "max_articles": subagent_config.get("hacker_news", {}).get("max_articles", 10),
@@ -216,15 +210,13 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse supervisor LLM response: {e}")
-        # Fallback: use safe defaults
         return (
             "Fetch articles from all sources (fallback strategy)",
             list(interest_profile.keys()),
             {
                 "rss": {"enabled": True, "max_articles": 15},
-                "tavily": {"enabled": True, "max_articles": 5},
-                "hacker_news": {"enabled": True, "max_articles": 5},
-                "arxiv": {"enabled": True, "max_articles": 5},
+                "hacker_news": {"enabled": True, "max_articles": 10},
+                "arxiv": {"enabled": True, "max_articles": 10},
             },
         )
     except Exception as e:
