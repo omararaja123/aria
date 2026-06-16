@@ -75,7 +75,10 @@ def publisher_node(state: ARIAState) -> ARIAState:
                 run_id,
             )
             state["message_id"] = message_id
-            logger.info(f"Newsletter sent: {message_id}")
+            if message_id.startswith("simulated_"):
+                logger.warning(f"Newsletter not sent (Gmail not configured): {message_id}")
+            else:
+                logger.info(f"Newsletter sent via Gmail: {message_id}")
         except Exception as send_error:
             logger.error(f"Send failed: {send_error}; using simulated ID")
             state["message_id"] = f"simulated_{run_id}"

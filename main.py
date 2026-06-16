@@ -510,6 +510,16 @@ def main():
 
                         if final_state.get("published"):
                             console.print("[bold green]✅ Newsletter published successfully![/bold green]")
+
+                            # Show email status
+                            message_id = final_state.get("message_id", "")
+                            if message_id.startswith("simulated_"):
+                                console.print("[yellow]⚠️  Email not sent (Gmail not configured)[/yellow]")
+                                console.print("[yellow]   → Set up Gmail credentials to enable email delivery[/yellow]")
+                            else:
+                                console.print(f"[green]📧 Email sent (Gmail API message_id: {message_id})[/green]")
+
+                            # Show local file path
                             console.print("[cyan]📁 HTML saved locally to:[/cyan]")
                             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                             console.print(f"[cyan]   newsletters/{timestamp}/newsletter.html[/cyan]\n")
