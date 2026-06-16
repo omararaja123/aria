@@ -277,6 +277,8 @@ if "reviewed_article_ids" not in st.session_state:
     st.session_state.reviewed_article_ids = set()
 if "current_article_index" not in st.session_state:
     st.session_state.current_article_index = 0
+if "decision_submitted" not in st.session_state:
+    st.session_state.decision_submitted = False
 
 
 # ============================================================================
@@ -721,13 +723,18 @@ def main():
                     with open(".aria_review_decision.json", "w") as f:
                         json.dump(decision_data, f)
                     st.session_state.show_feedback_form = False
+                    st.session_state.decision_submitted = True
+
                     if decision_type == "approve":
                         st.success("✓ Articles approved! Publishing now...")
                         st.balloons()
+                        st.info("📧 Your newsletter is being sent. This window will close shortly.")
                     elif decision_type == "re_rank":
                         st.info("🔄 Re-ranking with your feedback...")
+                        st.info("⏳ Processing... New articles will appear shortly.")
                     else:
                         st.warning("↻ Restarting fresh research with your feedback...")
+                        st.info("⏳ Fetching fresh articles... New review will appear shortly.")
 
             with col_cancel:
                 if st.button("✕ Cancel", use_container_width=True, key="cancel_decision"):

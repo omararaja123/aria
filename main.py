@@ -514,7 +514,9 @@ def main():
                             console.print("[bold yellow]⚠️  Newsletter not published[/bold yellow]\n")
 
                 finally:
-                    # Cleanup: terminate Streamlit process
+                    # Cleanup: terminate Streamlit process gracefully
+                    # Wait to let Streamlit finish rendering completion messages
+                    time.sleep(3)
                     try:
                         streamlit_process.terminate()
                         streamlit_process.wait(timeout=5)
