@@ -1,0 +1,49 @@
+# ARIA — Autonomous Research & Intelligence Aggregator
+# Python 3.11+ dependencies
+# Install with: pip install -r requirements.txt
+
+# Core agentic framework (flexible versioning for compatibility)
+langgraph>=0.0.52
+langchain>=0.1.20
+langchain-anthropic>=0.1.15
+
+# LLM and API clients
+anthropic>=0.28.0
+tavily-python>=0.3.0
+
+# Data fetching and parsing
+feedparser>=6.0.11
+arxiv>=2.1.0
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+
+# Data processing and state management
+pydantic>=2.6.4
+pandas>=2.2.0
+python-dateutil>=2.8.2
+
+# Email and OAuth
+google-api-python-client>=1.12.5
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+
+# Web UI and templates
+streamlit>=1.32.0
+jinja2>=3.1.2
+
+# Utilities
+python-dotenv>=1.0.0
+tenacity>=8.2.3
+rich>=13.7.0
+
+# Local embeddings (for deduplication, no API needed)
+sentence-transformers>=2.3.1
+scipy>=1.12.0
+
+# Observability (LangSmith): traces LLM calls and graph execution to dashboard
+# Set LANGSMITH_API_KEY in .env to enable; otherwise system works fine without it
+langsmith>=0.1.0
+
+# Testing
+pytest>=7.4.4
+pytest-asyncio>=0.23.2
