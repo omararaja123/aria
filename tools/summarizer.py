@@ -26,6 +26,9 @@ def summarizer_node(state: ARIAState) -> ARIAState:
     """
     Summarizer: Generate summaries with batch processing and caching.
 
+    On re-run path (review_re_rank=True): Skip articles rejected during human review.
+    This enables lazy summarization—only summarize articles user wants to keep.
+
     Error handling: If skill call fails, uses default summaries.
     Pipeline continues with degraded results.
     """
@@ -39,10 +42,24 @@ def summarizer_node(state: ARIAState) -> ARIAState:
         fetch_errors = state.get("fetch_errors", [])
         batch_size = SUMMARIZER_BATCH_SIZE
 
-        # Filter to summarizable articles (valid + not ranking-removed)
+        # Lazy summarization for re-rank path: skip articles rejected during review
+        is_re_rank = state.get("review_re_rank", False)
+        rejected_ids = set()
+        if is_re_rank:
+            human_edits = state.get("human_review_edits", [])
+            rejected_ids = {
+                edit.get("article_id") for edit in human_edits
+                if edit.get("action") == "reject"
+            }
+            if rejected_ids:
+                logger.info(f"Summarizer: re-rank mode - skipping {len(rejected_ids)} rejected articles")
+
+        # Filter to summarizable articles (valid + not ranking-removed + not rejected in re-rank)
         summarizable = [
             a for a in articles
-            if a.get("validation_status") == "valid" and not a.get("ranking_removed", False)
+            if (a.get("validation_status") == "valid" and
+                not a.get("ranking_removed", False) and
+                a.get("id") not in rejected_ids)
         ]
 
         logger.info(f"Summarizer: summarizing {len(summarizable)} articles")
@@ -160,9 +177,11 @@ def summarizer_node(state: ARIAState) -> ARIAState:
 
         # Log final stats
         final_summarized = sum(1 for a in summarizable if a.get("summary_text"))
+        skipped_count = len(rejected_ids) if is_re_rank else 0
         logger.info(
             f"Summarizer: {final_summarized}/{len(summarizable)} articles summarized "
             f"({llm_call_count} calls, ${estimated_cost_usd:.2f})"
+            + (f" [skipped {skipped_count} rejected articles]" if skipped_count > 0 else "")
         )
 
         # Update state

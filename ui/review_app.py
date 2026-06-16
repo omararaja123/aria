@@ -299,6 +299,15 @@ def filter_articles(articles: List[Dict], query: str, sections: List[str]) -> Li
     return filtered
 
 
+def get_source_contribution(articles: List[Dict]) -> Dict[str, int]:
+    """Count articles by source (fetch_source field). Returns dict of {source: count}."""
+    contribution = {}
+    for article in articles:
+        source = article.get("fetch_source", "unknown")
+        contribution[source] = contribution.get(source, 0) + 1
+    return contribution
+
+
 def render_article_card(article: Dict[str, Any], show_actions: bool = True):
     """Render a single article card with Apple-level polish."""
     st.markdown('<div class="article-card">', unsafe_allow_html=True)
@@ -518,6 +527,25 @@ def main():
 
         with col4:
             st.metric("Last Updated", datetime.now().strftime("%I:%M %p"))
+
+        # Per-source contribution breakdown
+        with st.expander("📊 Articles by Source", expanded=False):
+            source_contribution = get_source_contribution(articles)
+            if source_contribution:
+                # Display as a bar chart
+                source_names = list(source_contribution.keys())
+                source_counts = list(source_contribution.values())
+
+                # Create a nicer display
+                st.bar_chart(dict(sorted(source_contribution.items(), key=lambda x: x[1], reverse=True)))
+
+                # Also show as text
+                st.markdown("**Source Breakdown:**")
+                for source, count in sorted(source_contribution.items(), key=lambda x: x[1], reverse=True):
+                    pct = (count / len(articles)) * 100
+                    st.caption(f"• {source.replace('_', ' ').title()}: {count} articles ({pct:.0f}%)")
+            else:
+                st.caption("No source data available")
 
         st.markdown("---")
 
