@@ -10,7 +10,6 @@ This is the entry point for each weekly run.
 
 import json
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
 from anthropic import Anthropic
@@ -21,8 +20,6 @@ from config import (
     RANKER_BUDGET_USD,
     SUMMARIZER_BUDGET_USD,
     DRAFTER_BUDGET_USD,
-    DRAFTER_MODEL,
-    NEWSLETTER_SECTIONS,
 )
 from memory.topic_memory import get_topic_history, get_last_newsletter_date
 

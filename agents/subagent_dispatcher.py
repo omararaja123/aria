@@ -14,7 +14,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 import requests
@@ -26,9 +26,7 @@ from config import (
     HN_MIN_SCORE,
     HN_AI_KEYWORDS,
     RUNAWAY_GUARDS,
-    DOMAIN_BLACKLIST,
 )
-from skills.date_extraction_skill import extract_article_date
 
 logger = logging.getLogger(__name__)
 
