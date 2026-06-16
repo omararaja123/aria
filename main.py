@@ -150,12 +150,17 @@ def wait_for_review_decision(graph, config: dict, console: Console, max_wait_sec
     return {"review_approved": True, "review_rejected": False, "review_re_rank": False, "human_review_edits": []}
 
 
-def resume_from_checkpoint(graph, config: dict, decision_state: dict, console: Console) -> dict:
-    """Resume graph execution with user decision by manually calling remaining nodes."""
+def resume_from_checkpoint(graph, config: dict, decision_state: dict, console: Console) -> tuple[dict, bool]:
+    """
+    Resume graph execution with user decision by manually calling remaining nodes.
+    Returns (final_state, hit_human_review_again).
+    If hit_human_review_again is True, the UI should be refreshed.
+    """
     console.print("[bold cyan]Resuming pipeline from checkpoint...[/bold cyan]\n")
     console.print("━" * 70)
 
     final_state = None
+    hit_human_review_interrupt = False
 
     # Get current checkpoint state and merge with decision
     try:
@@ -200,20 +205,38 @@ def resume_from_checkpoint(graph, config: dict, decision_state: dict, console: C
             reviewed_state["fetch_errors"] = []
             reviewed_state["llm_call_count"] = 0
             reviewed_state["estimated_cost_usd"] = 0.0
+            reviewed_state["re_run_count"] = reviewed_state.get("re_run_count", 0) + 1
             # Continue streaming from supervisor
             for event in graph.stream(reviewed_state, config=config, stream_mode="updates"):
                 for node_name, node_state in event.items():
                     if isinstance(node_state, dict):
                         final_state = node_state
 
+            # Check if we hit human_review interrupt again
+            try:
+                state_snapshot = graph.get_state(config)
+                if state_snapshot and state_snapshot.next and "human_review" in state_snapshot.next:
+                    hit_human_review_interrupt = True
+            except Exception:
+                pass
+
         elif reviewed_state.get("review_re_rank"):
             # Re-rank with adjusted profile
             console.print("\n[bold cyan]Re-ranking with adjusted profile...[/bold cyan]")
+            reviewed_state["re_run_count"] = reviewed_state.get("re_run_count", 0) + 1
             # Continue streaming from ranker
             for event in graph.stream(reviewed_state, config=config, stream_mode="updates"):
                 for node_name, node_state in event.items():
                     if isinstance(node_state, dict):
                         final_state = node_state
+
+            # Check if we hit human_review interrupt again
+            try:
+                state_snapshot = graph.get_state(config)
+                if state_snapshot and state_snapshot.next and "human_review" in state_snapshot.next:
+                    hit_human_review_interrupt = True
+            except Exception:
+                pass
 
         else:
             # Default to publisher
@@ -224,7 +247,7 @@ def resume_from_checkpoint(graph, config: dict, decision_state: dict, console: C
         final_state = merged_state
 
     console.print("\n" + "━" * 70)
-    return final_state
+    return final_state, hit_human_review_interrupt
 
 
 def build_graph() -> StateGraph:
@@ -434,11 +457,44 @@ def main():
                 streamlit_process = launch_streamlit_review(run_id, console)
 
                 try:
-                    # Wait for user decision in Streamlit
-                    reviewed_state = wait_for_review_decision(graph, config, console)
+                    # Loop for multiple review rounds (approve, re-rank, etc.)
+                    while True:
+                        # Wait for user decision in Streamlit
+                        reviewed_state = wait_for_review_decision(graph, config, console)
 
-                    # Resume graph from checkpoint
-                    final_state = resume_from_checkpoint(graph, config, reviewed_state, console)
+                        # Resume graph from checkpoint
+                        final_state, hit_interrupt_again = resume_from_checkpoint(graph, config, reviewed_state, console)
+
+                        # If graph hit human_review interrupt again, refresh UI and loop
+                        if hit_interrupt_again:
+                            console.print("\n[bold cyan]⏸️  PAUSED AT HUMAN REVIEW CHECKPOINT (RE-RUN)[/bold cyan]")
+                            console.print("[cyan]Refreshing review interface with updated articles...[/cyan]\n")
+
+                            # Save updated state to JSON for Streamlit to read
+                            all_articles = final_state.get("articles", []) if final_state else []
+                            selected_articles = [a for a in all_articles if a.get("summary_text") and a.get("summary_text").strip()]
+
+                            state_to_save = {
+                                "run_id": run_id,
+                                "articles": selected_articles,
+                                "draft_newsletter": final_state.get("draft_newsletter", "") if final_state else "",
+                                "timestamp": start_time.isoformat(),
+                            }
+                            with open(".aria_state.json", "w") as f:
+                                json.dump(state_to_save, f, indent=2, default=json_serializer)
+
+                            # Signal Streamlit to refresh (clear decision file if it exists)
+                            try:
+                                if os.path.exists(".aria_review_decision.json"):
+                                    os.remove(".aria_review_decision.json")
+                            except Exception:
+                                pass
+
+                            # Loop back to wait for next decision
+                            continue
+
+                        # No more interrupts, exit loop
+                        break
 
                     # Summary
                     if final_state:

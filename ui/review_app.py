@@ -132,17 +132,32 @@ st.markdown("""
 # DATA LOADING (Automatic on startup)
 # ============================================================================
 
-@st.cache_data
 def load_latest_newsletter() -> Optional[List[Dict[str, Any]]]:
     """
     Load articles from the saved state file (.aria_state.json) created by main.py.
     This is written when the pipeline pauses at human_review.
+    Automatically detects when the file has been updated and reloads.
     """
     state_file = ".aria_state.json"
     if not os.path.exists(state_file):
         return None
 
     try:
+        # Check file modification time to detect updates
+        file_mtime = os.path.getmtime(state_file)
+
+        # Store last mtime in session state
+        if "state_file_mtime" not in st.session_state:
+            st.session_state.state_file_mtime = None
+
+        # If file has been modified, reload
+        if st.session_state.state_file_mtime != file_mtime:
+            st.session_state.state_file_mtime = file_mtime
+            # Clear session state for new article review
+            st.session_state.reviewed_article_ids = set()
+            st.session_state.current_article_index = 0
+            st.session_state.human_review_edits = []
+
         with open(state_file, "r") as f:
             state_data = json.load(f)
 
@@ -430,6 +445,19 @@ def render_empty_state():
 # ============================================================================
 
 def main():
+    # Auto-refresh when state file is updated (for re-rank loops)
+    state_file = ".aria_state.json"
+    if "state_file_mtime" not in st.session_state:
+        st.session_state.state_file_mtime = None
+
+    if os.path.exists(state_file):
+        current_mtime = os.path.getmtime(state_file)
+        if st.session_state.state_file_mtime != current_mtime and st.session_state.state_file_mtime is not None:
+            # File has been updated - refresh to show new articles
+            st.session_state.reviewed_article_ids = set()
+            st.session_state.current_article_index = 0
+            st.session_state.human_review_edits = []
+
     # Header
     st.markdown("# 🧠 ARIA — AI Research Intelligence")
     st.markdown("*Intelligent curation and review of research articles*")
