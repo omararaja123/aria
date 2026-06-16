@@ -509,7 +509,10 @@ def main():
                         console.print(f"  • Total cost: ${total_cost:.3f}\n")
 
                         if final_state.get("published"):
-                            console.print("[bold green]✅ Newsletter published successfully![/bold green]\n")
+                            console.print("[bold green]✅ Newsletter published successfully![/bold green]")
+                            console.print("[cyan]📁 HTML saved locally to:[/cyan]")
+                            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                            console.print(f"[cyan]   newsletters/{timestamp}/newsletter.html[/cyan]\n")
                         else:
                             console.print("[bold yellow]⚠️  Newsletter not published[/bold yellow]\n")
 

@@ -116,6 +116,13 @@ def publisher_node(state: ARIAState) -> ARIAState:
         except Exception as archive_error:
             logger.warning(f"Failed to archive newsletter: {archive_error}")
 
+        # Step 8: Save newsletter HTML locally (non-critical)
+        try:
+            local_path = _save_newsletter_locally(run_id, draft_newsletter, final_articles)
+            logger.info(f"Publisher: saved newsletter HTML locally to {local_path}")
+        except Exception as local_error:
+            logger.warning(f"Failed to save newsletter locally: {local_error}")
+
         # Update state
         state["published"] = True
         state["publish_timestamp"] = datetime.now()
@@ -497,3 +504,62 @@ def _archive_newsletter(
 
     except Exception as e:
         logger.error(f"Publisher: failed to archive newsletter: {e}")
+
+
+def _save_newsletter_locally(
+    newsletter_id: str,
+    html_content: str,
+    final_articles: List[Article],
+) -> str:
+    """
+    Save newsletter HTML locally to a timestamped folder for easy access and history.
+
+    Creates:
+    - newsletters/ folder (if doesn't exist)
+    - Subfolder with timestamp: newsletters/2026-06-16_18-35-42/
+    - Files:
+      - newsletter.html (the full HTML)
+      - metadata.json (article count, sources, etc.)
+
+    Returns: path to the saved newsletter file
+    """
+
+    # Create newsletters folder if it doesn't exist
+    newsletters_dir = "newsletters"
+    if not os.path.exists(newsletters_dir):
+        os.makedirs(newsletters_dir, exist_ok=True)
+
+    # Create timestamped subfolder
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    newsletter_folder = os.path.join(newsletters_dir, timestamp)
+    os.makedirs(newsletter_folder, exist_ok=True)
+
+    # Save HTML content
+    html_path = os.path.join(newsletter_folder, "newsletter.html")
+    with open(html_path, "w") as f:
+        f.write(html_content)
+
+    # Save metadata
+    section_breakdown = {}
+    source_breakdown = {}
+    for article in final_articles:
+        section = article.get("section", "Trending")
+        source = article.get("source_domain", "unknown")
+        section_breakdown[section] = section_breakdown.get(section, 0) + 1
+        source_breakdown[source] = source_breakdown.get(source, 0) + 1
+
+    metadata = {
+        "timestamp": datetime.now().isoformat(),
+        "newsletter_id": newsletter_id,
+        "total_articles": len(final_articles),
+        "sections": section_breakdown,
+        "sources": source_breakdown,
+        "html_file": "newsletter.html",
+    }
+
+    metadata_path = os.path.join(newsletter_folder, "metadata.json")
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    logger.info(f"Newsletter saved locally to {html_path}")
+    return html_path
