@@ -279,6 +279,8 @@ if "current_article_index" not in st.session_state:
     st.session_state.current_article_index = 0
 if "decision_submitted" not in st.session_state:
     st.session_state.decision_submitted = False
+if "decision_submitted_type" not in st.session_state:
+    st.session_state.decision_submitted_type = None
 
 
 # ============================================================================
@@ -447,6 +449,34 @@ def render_empty_state():
 # ============================================================================
 
 def main():
+    # Show completion screen if decision was submitted
+    if st.session_state.decision_submitted:
+        st.markdown("# 🎉 Decision Submitted")
+
+        decision_type = st.session_state.decision_submitted_type
+        if decision_type == "approve":
+            st.success("✅ Newsletter approved!")
+            st.markdown("---")
+            st.markdown("### 📧 Publishing Your Newsletter")
+            st.markdown("Your articles are being sent now. This window will close automatically.")
+            st.info("The pipeline is finalizing your newsletter and updating memory tables.")
+            st.balloons()
+        elif decision_type == "re_rank":
+            st.info("🔄 Re-ranking Articles")
+            st.markdown("---")
+            st.markdown("### ⏳ Processing Your Feedback")
+            st.markdown("New rankings are being generated based on your feedback.")
+            st.markdown("The updated articles will appear in a moment...")
+        else:  # reject
+            st.warning("↻ Restarting Pipeline")
+            st.markdown("---")
+            st.markdown("### ⏳ Fetching Fresh Articles")
+            st.markdown("Fresh research is being fetched from all sources.")
+            st.markdown("A new review interface will appear shortly...")
+
+        # Don't show anything else - just the completion screen
+        return
+
     # Auto-refresh when state file is updated (for re-rank loops)
     state_file = ".aria_state.json"
     if "state_file_mtime" not in st.session_state:
@@ -459,6 +489,9 @@ def main():
             st.session_state.reviewed_article_ids = set()
             st.session_state.current_article_index = 0
             st.session_state.human_review_edits = []
+            # Clear decision submitted flag for next round
+            st.session_state.decision_submitted = False
+            st.session_state.decision_submitted_type = None
 
     # Header
     st.markdown("# 🧠 ARIA — AI Research Intelligence")
@@ -724,17 +757,8 @@ def main():
                         json.dump(decision_data, f)
                     st.session_state.show_feedback_form = False
                     st.session_state.decision_submitted = True
-
-                    if decision_type == "approve":
-                        st.success("✓ Articles approved! Publishing now...")
-                        st.balloons()
-                        st.info("📧 Your newsletter is being sent. This window will close shortly.")
-                    elif decision_type == "re_rank":
-                        st.info("🔄 Re-ranking with your feedback...")
-                        st.info("⏳ Processing... New articles will appear shortly.")
-                    else:
-                        st.warning("↻ Restarting fresh research with your feedback...")
-                        st.info("⏳ Fetching fresh articles... New review will appear shortly.")
+                    st.session_state.decision_submitted_type = decision_type
+                    st.rerun()
 
             with col_cancel:
                 if st.button("✕ Cancel", use_container_width=True, key="cancel_decision"):
