@@ -13,14 +13,14 @@ Supervisor (1s, $0)
   • Sets fetch_plan and priority_topics
   • Returns: fetch_plan, priority_topics, subagent_instructions
   ↓
-Subagent Dispatcher (25s, $0) — 3 sources in parallel
-  ├─ RSS Fetcher: feedparser.parse(), max 15/feed
-  ├─ Hacker News: Firebase API, filters score ≥50, max 15
-  └─ ArXiv Fetcher: arxiv.Search(), max 15/query
+Subagent Dispatcher (25s, $0) — 3 trusted sources in parallel
+  ├─ RSS Fetcher: feedparser.parse(), max 15 articles/feed
+  ├─ Hacker News: Firebase API, filters score ≥50, max 15 articles
+  └─ ArXiv Fetcher: arxiv.Search(), max 15 articles/query
   
-  Raw articles: ~40-50 (trusted sources only, no Tavily)
-  Fetched via: RSS (15-20) + HN (10-15) + ArXiv (15-20)
-  Max per source: 15, Total cap: 120
+  Raw articles: ~40-50 (3 trusted sources, verified date metadata)
+  Fetched via: RSS (15-20) + HN (10-15) + ArXiv (15-20) in parallel
+  Max per source: 15, Total cap: 120, Published date verified for all
   ↓
 Validator (5s, $0)
   • Date filter: articles > 7 days old → removed

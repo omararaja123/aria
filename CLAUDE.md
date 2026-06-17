@@ -38,7 +38,7 @@ That's it! The system automatically:
 - ✅ All 9 nodes have try/except error handling with graceful fallbacks
 - ✅ All 9 runaway guards enforced and verified
 - ✅ 10 unit tests (4 validator, 3 deduplicator, 3 state)
-- ✅ End-to-end test verified working (4 subagents fetching, error handling for ArXiv rate limits)
+- ✅ End-to-end test verified working (3 subagents fetching, error handling for ArXiv rate limits)
 
 ### Step 13.3+ Enhancements (Human Review UI & Summary Quality)
 - ✅ **Per-article feedback boxes**: 300-char comment fields on each article (before action buttons)
@@ -174,11 +174,10 @@ All tables are in `newsletter.db` and survive across runs:
 **Timestamp**: 2026-06-15 20:34:20
 
 ### Observed Stages
-- ✅ Supervisor: LLM strategy executed ($1.40 budget remaining)
-- ✅ RSS: Fetching 6 feeds
-- ✅ Tavily: Searching "Large Language Models"
-- ✅ Hacker News: Fetching top stories
-- ✅ ArXiv: Multiple searches (Vision Transformers: 3 articles, RL: rate limited at 429)
+- ✅ Supervisor: LLM strategy executed ($1.60 budget remaining)
+- ✅ RSS: Fetching from 7 feeds (DeepMind, Google, HuggingFace, TechCrunch, The Gradient, Papers with Code, MIT Tech Review)
+- ✅ Hacker News: Fetching top stories filtered by AI keywords
+- ✅ ArXiv: Multiple searches (LLMs, Vision Transformers, RL, AI Safety — rate limited at 429)
 - ✅ Error handling: ArXiv HTTP 429 caught by try/except, other fetchers continued
 - ✅ Runaway guards: 90s timeout active on long-running requests
 
@@ -253,8 +252,8 @@ All tables are in `newsletter.db` and survive across runs:
 - OAuth-based gmail setup (currently needs manual credentials.json)
 
 **API Constraints** (By Design):
-- ArXiv: Rate limit (429) after ~3 rapid requests → gracefully handled
-- Tavily: Free tier limited to 1000/month → monitored but not enforced
+- ArXiv: Rate limit (429) after ~3 rapid requests → gracefully handled (other fetchers continue)
+- RSS/HN: Free public APIs, no rate limits observed in practice
 - Gmail: Requires manual credential setup (see README.md)
 
 **Scope**:

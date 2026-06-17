@@ -348,13 +348,8 @@ When ARIA reaches the drafting stage, a Streamlit web interface appears in your 
 
 **Pricing**: ~$0.01 per run (for relevance scoring, summarization, and drafting). Estimating ~15 LLM calls per run × ~$0.0015/call ≈ $0.02–$0.03 per run.
 
-### Tavily Web Search
-1. Go to [tavily.com](https://tavily.com/)
-2. Sign up (free tier available; ~100 searches/month)
-3. Get your API key from the dashboard
-4. Paste it into `.env` as `TAVILY_API_KEY`
-
-**Pricing**: Free tier (100 searches/month) is sufficient for ~20 runs/month. Paid plans start at $0.01 per search.
+### Tavily Web Search (Disabled)
+**Note**: Tavily web search integration has been disabled in favor of 3 trusted sources (RSS, Hacker News, ArXiv) with verified date metadata. Tavily results lacked reliable publication date extraction, making them unsuitable for a news aggregator. No API key required.
 
 ### Hacker News & ArXiv
 **No API key required**. Both are public APIs. ARIA fetches data directly.
@@ -379,8 +374,8 @@ Edit `config.py` to customize:
   - Max 15 articles per source per agent
   - Max 120 raw articles total
   - Circuit breaker at 60 after filtering
-  - Max 40 LLM calls per run
-  - Max $2.50 cost per run
+  - Max 20 LLM calls per run
+  - Max $2.00 cost per run
   - Max 90 seconds per subagent
 
 ---
@@ -390,19 +385,18 @@ Edit `config.py` to customize:
 ```
 Supervisor (read memory, set plan)
     ↓
-[4 Parallel Subagents]
-  - RSS Agent (feedparser)
-  - Tavily Search (web API)
+[3 Parallel Subagents]
+  - RSS Feeds (feedparser)
   - Hacker News (Firebase API)
   - ArXiv (research API)
     ↓
 Validator (credibility, date, circuit breaker)
     ↓
-Deduplicator (exact + fuzzy)
+Deduplicator (exact + cross-week fingerprint)
     ↓
-Ranker (LLM relevance scoring)
+Ranker (LLM relevance scoring, batched)
     ↓
-Summarizer (LLM per-article summaries)
+Summarizer (LLM per-article summaries, batched + cached)
     ↓
 Drafter (HTML assembly)
     ↓
@@ -426,7 +420,7 @@ This project satisfies **all 10 core requirements** of the "Mastering Agentic AI
 - **Validator** applies circuit breaker autonomously
 
 ### ✅ 2. Tool Use
-- **4 Subagents** use external APIs: feedparser (RSS), tavily-python (web search), requests (Hacker News Firebase), arxiv library (research papers)
+- **3 Subagents** use external APIs: feedparser (RSS), requests (Hacker News Firebase), arxiv library (research papers)
 - **Publisher** uses gmail-api-python-client for email sending
 - Each tool has error handling and retry logic (tenacity)
 
@@ -455,7 +449,7 @@ This project satisfies **all 10 core requirements** of the "Mastering Agentic AI
 - **Interrupt checkpoint** at human_review node
 
 ### ✅ 7. Subagents with Shared State
-- **4 subagents** (RSS, Tavily, HN, ArXiv) write to shared `raw_articles` list
+- **3 subagents** (RSS, HN, ArXiv) write to shared `articles` list in parallel
 - Uses `Annotated[list, operator.add]` for parallel-safe merging
 - All subagents run concurrently; outputs are automatically aggregated
 
@@ -478,14 +472,16 @@ This project satisfies **all 10 core requirements** of the "Mastering Agentic AI
 - Skills are decoupled from graph logic; can be swapped/updated independently
 
 ### ✅ 10. Runaway Protection & Eval Layer
-**Runaway Guards** (7 layers):
+**Runaway Guards** (9 enforced):
 1. Max 15 articles per source per agent
 2. Max 120 raw articles before filtering
 3. Circuit breaker: max 60 after filtering
-4. Max 40 LLM calls per run
-5. Max $2.50 cost per run
+4. Max 20 LLM calls per run
+5. Max $2.00 cost per run
 6. Max 90-second timeout per subagent
 7. Max 7-day article age
+8. Max 24-hour human review pause (auto-approve timeout)
+9. Max 2 re-runs per review (prevent infinite loops)
 
 **Eval Layer** (5 metrics):
 1. **Relevance rate** — thumbs up % (agent scoring accuracy)
@@ -545,7 +541,7 @@ Make sure your `.env` file has `ANTHROPIC_API_KEY=sk-ant-...` and you've run `so
 This is expected behavior if there's a lot of new content. The system is limiting to 60 articles after filtering (configurable in config.py).
 
 ### "LLM call budget exceeded"
-The system defaults to max 40 LLM calls and $2.50 cost per run. This is intentional safety. To increase, edit RUNAWAY_GUARDS in config.py.
+The system defaults to max 20 LLM calls and $2.00 cost per run. This is intentional safety. To increase, edit RUNAWAY_GUARDS in config.py.
 
 ---
 
@@ -557,32 +553,35 @@ aria/
 ├── state.py                      # ARIAState TypedDict and all supporting types
 ├── config.py                     # Configuration (interests, feeds, guards, sections)
 │
-├── agents/                       # 3 subagents + supervisor
+├── agents/                       # Orchestration layer
 │   ├── supervisor.py            # Orchestrator; reads memory, sets plan
-│   ├── rss_agent.py             # RSS feed fetcher
-│   ├── hn_agent.py              # Hacker News fetcher
-│   └── arxiv_agent.py           # ArXiv paper fetcher
+│   └── subagent_dispatcher.py   # Coordinator for 3 parallel fetchers (RSS, HN, ArXiv)
 │
-├── tools/                        # Pipeline processing nodes
-│   ├── validator.py             # Credibility + date + circuit breaker
-│   ├── deduplicator.py          # Exact + fuzzy dedup
-│   ├── ranker.py                # LLM relevance scoring
-│   ├── summarizer.py            # LLM article summarization
-│   ├── drafter.py               # HTML newsletter assembly
-│   └── publisher.py             # Gmail send + memory update
+├── tools/                        # Pipeline processing nodes (7 nodes)
+│   ├── validator.py             # Credibility + date + circuit breaker filtering
+│   ├── deduplicator.py          # Exact URL + cross-week fingerprint dedup
+│   ├── ranker.py                # LLM relevance scoring (batched: 5/call)
+│   ├── summarizer.py            # LLM article summarization (batched: 3/call, cached)
+│   ├── drafter.py               # HTML newsletter template assembly
+│   ├── human_review.py          # Checkpoint node for user approval
+│   └── publisher.py             # Gmail send + 8 memory table updates
 │
-├── memory/                       # Persistence layer
+├── memory/                       # 8 SQLite tables + persistence layer
 │   ├── db.py                    # SQLite init + connection pooling
-│   ├── source_memory.py         # Domain credibility scores
-│   ├── story_memory.py          # Article fingerprints (cross-week dedup)
-│   ├── preference_memory.py     # Interest profile drift
+│   ├── source_memory.py         # Domain credibility scores (learned from feedback)
+│   ├── story_memory.py          # Article fingerprints (28-day cross-week dedup)
+│   ├── user_feedback.py         # Human actions from review (approve/reject)
+│   ├── topic_memory.py          # Topics covered (avoid repetition)
+│   ├── preference_memory.py     # Interest profile drift (learning history)
+│   ├── eval_results.py          # Performance metrics (relevance, dedup, calibration)
 │   └── newsletter_archive.py    # Sent newsletters + metadata
 │
-├── skills/                       # Versioned LLM prompt templates
-│   ├── summarization_skill.py   # 3-sentence summary + "why it matters"
-│   ├── relevance_skill.py       # Score article vs. interests
-│   ├── credibility_skill.py     # Score source credibility
-│   └── drafting_skill.py        # HTML newsletter rendering
+├── skills/                       # 4 versioned LLM prompt templates
+│   ├── skill_interface.py       # Base SkillResult interface
+│   ├── summarization.md         # 3-sentence summary + "why it matters" (Haiku, batched)
+│   ├── relevance.md             # Score article vs. user interests (Haiku, batched 5/call)
+│   ├── credibility.md           # Score source domain credibility (Haiku, cached 30d)
+│   └── drafting.md              # HTML newsletter intro paragraph (Sonnet)
 │
 ├── ui/                           # Streamlit human review interface
 │   └── review_app.py            # Draft preview + feedback UI
@@ -612,18 +611,19 @@ aria/
 ## Tech Stack
 
 - **Language**: Python 3.11+
-- **Agentic Framework**: LangGraph (state graphs + interrupts)
-- **LLM**: Claude Sonnet 4.6 (via Anthropic API)
-- **Subagent Data Sources** (3 trusted sources):
-  - RSS: feedparser (no API key)
-  - Hacker News: Firebase API (no API key)
-  - Research Papers: ArXiv API (no API key)
-  - *(Tavily disabled: unreliable date extraction)*
+- **Agentic Framework**: LangGraph (state graphs, checkpoints, conditional routing, interrupts)
+- **LLM Models**: 
+  - Claude Sonnet 4.6 (strategy planning, HTML drafting)
+  - Claude Haiku 4.5 (ranking, summarization, credibility scoring — batched for cost optimization)
+- **Data Sources** (3 trusted, free APIs):
+  - RSS feeds (feedparser library)
+  - Hacker News (Firebase public API)
+  - ArXiv research papers (arxiv library)
 - **Email**: Gmail API via google-api-python-client + OAuth2
-- **Database**: SQLite + sqlite3
-- **Web UI**: Streamlit (human review checkpoint)
+- **Database**: SQLite (8 tables, persistent memory across runs)
+- **Web UI**: Streamlit (human review checkpoint, progressive decision flow)
 - **HTML Templating**: Jinja2
-- **Utilities**: pydantic (types), tenacity (retries), requests (HTTP), beautifulsoup4 (scraping), rich (logging)
+- **Utilities**: requests (HTTP), rich (logging), python-dotenv (env config)
 
 ---
 
@@ -638,20 +638,20 @@ aria/
 - **Total**: ~8 minutes end-to-end
 
 **Cost** (Per Run):
-- Ranker (20 articles × $0.12): $2.40
-- Summarizer (20 articles × $0.15): $3.00
-- Drafter (intro generation): $0.25
-- Tavily searches (optional, free tier): $0.00
-- RSS/HN/ArXiv/Gmail: $0.00
-- **Total**: ~$5.50 per run (or $5.00 with discounts)
+- Supervisor strategy: $0.003 (Claude Sonnet)
+- Ranker (5 articles/batch, 4 batches): $0.060 (Claude Haiku)
+- Summarizer (3 articles/batch, 7 batches, with cache): $0.140 (Claude Haiku)
+- Drafter (intro generation): $0.003 (Claude Sonnet)
+- Credibility scoring (cached 30 days): $0.001 (Claude Haiku)
+- RSS/HN/ArXiv/Gmail: $0.00 (all free APIs)
+- **Total**: ~$0.27 per run
 
 ### Yearly Estimates (52 Weeks)
 
 **Cost**:
-- Annual Claude cost: ~$260–$290 (52 runs × $5–$5.50)
-- Tavily: $0 on free tier; $10–20 on paid if high volume
-- All other sources: $0
-- **Total**: **~$270–$310/year**
+- Annual Claude cost: ~$14.04 (52 runs × $0.27)
+- All data sources: $0 (RSS, Hacker News, ArXiv, Gmail are free)
+- **Total**: **~$14/year**
 
 **Time**:
 - Setup (first time): ~2 hours (Gmail OAuth, API keys, database init)

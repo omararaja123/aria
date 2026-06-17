@@ -2,7 +2,7 @@
 
 ## Complete Graph Definition
 
-The ARIA system is a LangGraph StateGraph with 15 nodes and conditional edges that implement a news aggregation and curation pipeline. The graph uses `Annotated[list, operator.add]` for parallel-safe writes, `interrupt_before` for human-in-the-loop checkpoints, and optional LangSmith tracing for observability.
+The ARIA system is a LangGraph StateGraph with 9 nodes and conditional edges that implement a news aggregation and curation pipeline. The graph uses `Annotated[list, operator.add]` for parallel-safe writes, `interrupt_before` for human-in-the-loop checkpoints, and optional LangSmith tracing for observability.
 
 **Optional Observability**: Set `LANGSMITH_API_KEY` environment variable to enable production-grade tracing and evals monitoring via LangSmith. If not set, the system functions normally without tracing.
 
@@ -28,23 +28,22 @@ The ARIA system is a LangGraph StateGraph with 15 nodes and conditional edges th
 - **Logic**:
   1. Reads topic_history from memory; identifies which topics were heavily covered last week (> 3 articles).
   2. Deprioritizes topics with heavy coverage; boost underrepresented topics.
-  3. **Intelligent subagent dispatch**: Decides which subagents to enable:
-     - RSS: Always on (most reliable, low cost)
-     - Tavily: On if budget permits and last week lacked fresh trending coverage
-     - HN: On if budget permits (good for hot takes, developer perspective)
-     - ArXiv: On if interest_profile emphasizes research (vision, NLP, ML)
+  3. **Intelligent subagent dispatch**: Decides fetch budgets for 3 trusted sources:
+     - RSS: Always on (most reliable, low cost, well-structured feeds)
+     - Hacker News: On if budget permits (good for developer sentiment and hot takes)
+     - ArXiv: On if interest_profile emphasizes research topics (LLMs, Vision, RL, Safety)
   4. **Dynamic fetch budgets**: Allocates articles per subagent based on cost constraints:
-     - If cost_budget high ($5.00): request 15 articles per subagent
-     - If cost_budget tight ($2.50): request 5 articles per subagent
+     - If cost_budget high ($2.00): request 15 articles per subagent
+     - If cost_budget tight (<$1.00): request 5 articles per subagent
   5. Computes a human-readable fetch_plan string.
   6. Estimates cost for Ranker + Summarizer; subtracts from budget to get remaining.
 - **Error handling**: If memory lookup fails, uses conservative defaults (all subagents on, 5 articles each).
 - **Execution time**: ~2 seconds (memory reads + logic).
 - **Cost**: $0 (no LLM calls).
 
-### Node 2: Subagent Dispatcher (Consolidated)
+### Node 2: Subagent Dispatcher (3 Parallel Fetchers)
 - **Function**: `agents/subagent_dispatcher.py:subagent_dispatcher_node(state: ARIAState) -> ARIAState`
-- **Role**: Coordinate 3 trusted data sources (RSS, Hacker News, ArXiv) in parallel, consolidating their results.
+- **Role**: Coordinate 3 trusted data sources (RSS feeds, Hacker News, ArXiv) in parallel via asyncio.
 - **State Reads**:
   - `priority_topics`, `subagent_instructions` (from supervisor)
   - Config: `RSS_FEEDS`, `HN_MIN_SCORE`, `HN_AI_KEYWORDS`, `ARXIV_QUERIES`
@@ -599,7 +598,7 @@ resumed_result = graph.invoke(
 
 ## Error Handling & Retry Strategy
 
-### Subagent Failures (RSS, Tavily, HN, ArXiv)
+### Subagent Failures (RSS, HN, ArXiv)
 - **On feed timeout or API error**: Append error dict to fetch_errors; continue with partial results.
 - **Retry**: tenacity.retry(wait=exponential_backoff(), stop=stop_after_attempt(3)) wraps each API call.
 - **Graceful degradation**: If 1 subagent fails completely, others still run and produce results.
@@ -621,7 +620,7 @@ resumed_result = graph.invoke(
 
 ### Typical Run Time (Optimized with Haiku + Batching)
 - **Supervisor**: ~1 second
-- **Subagent Dispatcher (parallel)**: ~25 seconds (max of RSS 20s, Tavily 10s, HN 15s, ArXiv 25s)
+- **Subagent Dispatcher (parallel)**: ~25 seconds (max of RSS 15–20s, HN 10–15s, ArXiv 20–25s)
 - **Validator**: ~5 seconds
 - **Deduplicator**: ~2 seconds
 - **Ranker** (4 batches × 5 articles, Claude Haiku): ~12 seconds (vs. ~40s with Sonnet)
@@ -644,7 +643,7 @@ resumed_result = graph.invoke(
   - Summarizer (Haiku, 7 batch calls): ~$0.28 (vs. $3.00 with Sonnet serial)
   - Drafter: $0.00 (static template; can enable LLM for ~$0.01)
   - **Subtotal**: ~$0.34
-- **Tavily searches**: $0.00–$0.05 (on free tier; paid tier if volume high)
+- **RSS/HN/ArXiv**: $0.00 (all free public APIs)
 - **Other APIs**: $0.00 (RSS, HN, ArXiv are free)
 - **Gmail API**: Free
 - **Total**: ~$0.34–$0.39 per full run (weekly cost: ~$18–$20/year)
@@ -697,7 +696,7 @@ resumed_result = graph.invoke(
 1. Create `agents/new_agent.py` with a node function.
 2. Add node and edges: `graph.add_edge("supervisor", "new_agent")` and `graph.add_edge("new_agent", "validator")`.
 3. Ensure raw_articles is written via `Annotated[list, operator.add]`.
-4. **Note**: Tavily was previously disabled; its API calls removed due to unreliable date extraction.
+4. **Note**: Tavily web search was disabled in favor of 3 trusted sources (RSS, HN, ArXiv) with verified date metadata. See CLAUDE.md for details.
 
 ### Adding a New Filter (e.g., Language Detection)
 1. Add a field to Article (language_code).
