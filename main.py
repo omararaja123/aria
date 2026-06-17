@@ -527,18 +527,11 @@ def main():
                             console.print("[bold yellow]⚠️  Newsletter not published[/bold yellow]\n")
 
                 finally:
-                    # Cleanup: terminate Streamlit process gracefully
-                    # Wait to let Streamlit finish rendering completion messages
-                    time.sleep(3)
-                    try:
-                        streamlit_process.terminate()
-                        streamlit_process.wait(timeout=5)
-                    except Exception as e:
-                        logger.debug(f"Streamlit cleanup: {e}")
-                        try:
-                            streamlit_process.kill()
-                        except Exception:
-                            pass
+                    # Keep Streamlit running so completion message stays visible
+                    # User can close it manually when ready, or run python3 main.py again
+                    console.print("\n[cyan]📱 Streamlit is still running at http://localhost:8501[/cyan]")
+                    console.print("[cyan]   You can close it when ready, or run 'python3 main.py' again[/cyan]\n")
+                    logger.info("Streamlit kept running - user can close manually or re-run pipeline")
 
             else:
                 console.print("\n[bold green]✓ Pipeline completed (full execution)[/bold green]\n")

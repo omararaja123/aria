@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-06-16T21:31:59.136596",
+  "newsletter_id": "1ceeb4c6-702a-40c5-88f8-10ccd578039f",
+  "total_articles": 32,
+  "sections": {
+    "Industry News": 9,
+    "Research": 10,
+    "Tools & Resources": 4,
+    "Trending": 7,
+    "Analysis & Opinion": 2
+  },
+  "sources": {
+    "deepmind.google": 3,
+    "blog.google": 2,
+    "huggingface.co": 2,
+    "technologyreview.com": 8,
+    "news.ycombinator.com": 5,
+    "arxiv.org": 12
+  },
+  "html_file": "newsletter.html"
+}
