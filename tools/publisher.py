@@ -33,14 +33,14 @@ logger = logging.getLogger(__name__)
 try:
     from google.auth.transport.requests import Request
     from google.oauth2.service_account import Credentials
-    from google.auth.oauthlib.flow import InstalledAppFlow
+    from google_auth_oauthlib.flow import InstalledAppFlow
     from google.oauth2.credentials import Credentials as OAuthCredentials
-    from google.api_python_client.discovery import build
+    from googleapiclient.discovery import build
     import google.auth
     HAS_GMAIL = True
-except ImportError:
+except ImportError as e:
     HAS_GMAIL = False
-    logger.warning("Gmail API libraries not installed; publishing will be simulated")
+    logger.warning(f"Gmail API libraries not installed ({e}); publishing will be simulated")
 
 
 def publisher_node(state: ARIAState) -> ARIAState:
