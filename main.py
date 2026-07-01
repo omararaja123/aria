@@ -10,9 +10,16 @@ Uses SqliteSaver for persistent state checkpointing across the human review paus
 Streams execution with rich terminal output and progress reporting.
 """
 
+# Load .env FIRST, before any other imports (LangChain reads env vars at import time)
+from pathlib import Path
+from dotenv import load_dotenv
+env_path = Path(__file__).parent / ".env"
+load_dotenv(str(env_path))
+
 import json
 import logging
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -29,6 +36,12 @@ from rich.logging import RichHandler
 from config import INTEREST_PROFILE
 from memory.db import init_db
 from state import ARIAState
+from aria.langsmith_config import (
+    setup_langsmith,
+    create_run_metadata,
+    get_langsmith_client,
+    get_project_name,
+)
 
 # Import all nodes
 from agents.supervisor import supervisor_node
@@ -53,6 +66,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def find_available_port(start_port: int, attempts: int = 20) -> int:
+    """Find an available localhost port, starting from the preferred port."""
+    for port in range(start_port, start_port + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(
+        f"No available Streamlit port found in range {start_port}-{start_port + attempts - 1}"
+    )
+
+
 def launch_streamlit_review(run_id: str, console: Console) -> subprocess.Popen:
     """
     Launch Streamlit review UI in background.
@@ -60,10 +88,15 @@ def launch_streamlit_review(run_id: str, console: Console) -> subprocess.Popen:
     """
     console.print("[bold cyan]🌐 Launching Streamlit review interface...[/bold cyan]\n")
 
+    preferred_port = int(os.getenv("ARIA_REVIEW_PORT", "8501"))
+    review_port = find_available_port(preferred_port)
+    review_url = f"http://localhost:{review_port}"
+
     env = os.environ.copy()
     env["STREAMLIT_SERVER_HEADLESS"] = "true"
-    env["STREAMLIT_SERVER_PORT"] = "8501"
+    env["STREAMLIT_SERVER_PORT"] = str(review_port)
     env["STREAMLIT_LOGGER_LEVEL"] = "error"
+    env["ARIA_REVIEW_PORT"] = str(review_port)
 
     process = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", "ui/review_app.py",
@@ -87,14 +120,15 @@ def launch_streamlit_review(run_id: str, console: Console) -> subprocess.Popen:
             console.print(f"[red]{stdout}[/red]")
         raise RuntimeError("Streamlit failed to start. Check error output above.")
 
-    console.print("[green]✓ Streamlit started at http://localhost:8501[/green]\n")
+    console.print(f"[green]✓ Streamlit started at {review_url}[/green]\n")
     console.print("[cyan]Opening in your browser...[/cyan]\n")
 
     try:
-        webbrowser.open("http://localhost:8501")
+        webbrowser.open(review_url)
     except Exception:
         pass
 
+    process.review_url = review_url
     return process
 
 
@@ -103,8 +137,6 @@ def wait_for_review_decision(graph, config: dict, console: Console, max_wait_sec
     Poll for user decision from Streamlit (written to .aria_review_decision.json).
     Once decision is detected, return the decision for graph resume.
     """
-    import json
-    import os
 
     console.print("[cyan]Waiting for your review decision...[/cyan]\n")
     console.print("[dim]You can:[/dim]")
@@ -306,10 +338,14 @@ def main():
     console.print("[dim]Complete LangGraph with 9 nodes, checkpoint, and human-in-loop[/dim]\n")
 
     try:
-        # Load .env variables
-        from dotenv import load_dotenv
-        load_dotenv()
-        logger.info("Environment variables loaded from .env")
+        # .env already loaded at module level
+        logger.info("Environment variables already loaded from .env")
+
+        # Setup LangSmith tracing (optional)
+        if setup_langsmith():
+            console.print("[cyan]View traces at: https://smith.langchain.com/projects/ARIA[/cyan]\n")
+        else:
+            console.print()
 
         # Initialize database
         console.print("[yellow]Initializing database...[/yellow]")
@@ -358,6 +394,8 @@ def main():
             "subagent_instructions": {},
             "estimated_budget_remaining": 2.0,
             "draft_newsletter": "",
+            "draft_newsletter_markdown": "",
+            "final_articles": [],
             "newsletter_metadata": {},
             "last_newsletter_date": None,
             "topic_history": {},
@@ -378,35 +416,61 @@ def main():
         console.print("[bold yellow]Executing pipeline (9 nodes)...[/bold yellow]\n")
         console.print("━" * 70)
 
-        config = {"configurable": {"thread_id": run_id}}
+        # Configure graph execution with run metadata for LangSmith
+        metadata = create_run_metadata(run_id, start_time.isoformat())
+        config = {
+            "configurable": {"thread_id": run_id},
+            "tags": metadata["tags"],
+            "metadata": metadata["metadata"]
+        }
         node_metrics = {}
         final_state = None
+        ls_client = get_langsmith_client()
 
-        for event in graph.stream(initial_state, config=config, stream_mode="updates"):
-            for node_name, node_state in event.items():
-                # Handle different event types (dict vs tuple)
-                if isinstance(node_state, dict):
-                    final_state = node_state
-                    article_count = len(node_state.get("articles", []))
-                    llm_calls = node_state.get("llm_call_count", 0)
-                    cost = node_state.get("estimated_cost_usd", 0.0)
-                else:
-                    # Skip non-dict events (e.g., interrupt notifications)
-                    continue
+        from contextlib import nullcontext
+        from langsmith import tracing_context
 
-                console.print(f"\n[bold blue]→ {node_name:25}[/bold blue]", end="")
-                console.print(
-                    f"  {article_count:3d} articles  "
-                    f"{llm_calls:2d} LLM calls  "
-                    f"${cost:6.3f}",
-                    style="cyan"
-                )
+        trace_context = (
+            tracing_context(
+                client=ls_client,
+                project_name=get_project_name(),
+                enabled=True,
+                tags=metadata["tags"],
+                metadata=metadata["metadata"],
+            )
+            if ls_client
+            else nullcontext()
+        )
 
-                node_metrics[node_name] = {
-                    "articles": article_count,
-                    "llm_calls": llm_calls,
-                    "cost": cost,
-                }
+        with trace_context:
+            for event in graph.stream(initial_state, config=config, stream_mode="updates"):
+                for node_name, node_state in event.items():
+                    # Handle different event types (dict vs tuple)
+                    if isinstance(node_state, dict):
+                        final_state = node_state
+                        article_count = len(node_state.get("articles", []))
+                        llm_calls = node_state.get("llm_call_count", 0)
+                        cost = node_state.get("estimated_cost_usd", 0.0)
+                    else:
+                        # Skip non-dict events (e.g., interrupt notifications)
+                        continue
+
+                    console.print(f"\n[bold blue]→ {node_name:25}[/bold blue]", end="")
+                    console.print(
+                        f"  {article_count:3d} articles  "
+                        f"{llm_calls:2d} LLM calls  "
+                        f"${cost:6.3f}",
+                        style="cyan"
+                    )
+
+                    node_metrics[node_name] = {
+                        "articles": article_count,
+                        "llm_calls": llm_calls,
+                        "cost": cost,
+                    }
+
+            if ls_client:
+                ls_client.flush()
 
         console.print("\n" + "━" * 70)
 
@@ -529,7 +593,8 @@ def main():
                 finally:
                     # Keep Streamlit running so completion message stays visible
                     # User can close it manually when ready, or run python3 main.py again
-                    console.print("\n[cyan]📱 Streamlit is still running at http://localhost:8501[/cyan]")
+                    review_url = getattr(streamlit_process, "review_url", "http://localhost:8501")
+                    console.print(f"\n[cyan]📱 Streamlit is still running at {review_url}[/cyan]")
                     console.print("[cyan]   You can close it when ready, or run 'python3 main.py' again[/cyan]\n")
                     logger.info("Streamlit kept running - user can close manually or re-run pipeline")
 
